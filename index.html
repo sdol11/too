@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TOEIC Speaking Timer</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    .question-buttons, .controls, .range-controls {
+      margin: 10px 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .display {
+      font-size: 48px;
+      margin: 20px;
+    }
+    .question-settings {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      margin: 10px 0;
+      gap: 6px;
+    }
+    .question-settings .row {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      font-size: 15px;
+    }
+    .question-settings .row span {
+      min-width: 60px;
+    }
+    .question-settings input[type="number"] {
+      width: 50px;
+      padding: 5px;
+      font-size: 14px;
+      text-align: right;
+    }
+    label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .switch {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>TOEIC Speaking Timer</h1>
+
+  <div class="controls">
+    문제 수: <input type="number" id="questionCount" value="6" min="1" onchange="renderQuestionButtons()">
+  </div>
+
+  <div class="question-buttons" id="questionButtons"></div>
+
+  <div class="switch">
+    <label><input type="checkbox" id="autoAdvance" checked> 자동 다음 문제 전환</label>
+  </div>
+
+  <div class="range-controls">
+    범위 실행: 시작 <input type="number" id="rangeStart" value="1" min="1"> ~ 끝 <input type="number" id="rangeEnd" value="3" min="1">
+    <button onclick="startRangeQuestions()">범위 실행</button>
+  </div>
+
+  <div id="mode">Preparation</div>
+  <div class="display" id="timer">00:00</div>
+
+  <div class="controls">
+    <button onclick="startSelectedOrCurrent()">시작</button>
+    <button onclick="resetTimer()">Reset</button>
+  </div>
+
+  <div class="question-settings" id="questionSettings"></div>
+
+  <audio id="beep">
+    <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
+  </audio>
+
+  <script>
+    let currentQuestion = 1;
+    let questions = [];
+    let timer;
+    let playingAll = false;
+    let playRange = false;
+    let rangeList = [];
+
+    const beep = document.getElementById("beep");
+    const timerDisplay = document.getElementById("timer");
+    const modeDisplay = document.getElementById("mode");
+    const questionButtonsDiv = document.getElementById("questionButtons");
+    const questionSettingsDiv = document.getElementById("questionSettings");
+    const questionCountInput = document.getElementById("questionCount");
+    const autoAdvanceCheckbox = document.getElementById("autoAdvance");
+
+    function playBeep() {
+      beep.currentTime = 0;
+      beep.play();
+    }
+
+    function loadSavedData() {
+      const savedQuestions = localStorage.getItem("toeic_questions");
+      const savedCount = localStorage.getItem("toeic_count");
+      if (savedQuestions && savedCount) {
+        questions = JSON.parse(savedQuestions);
+        questionCountInput.value = parseInt(savedCount);
+      }
+    }
+
+    function saveData() {
+      localStorage.setItem("toeic_questions", JSON.stringify(questions));
+      localStorage.setItem("toeic_count", questionCountInput.value);
+    }
+
+    function renderQuestionButtons() {
+      const count = parseInt(questionCountInput.value);
+      questions = Array.from({ length: count }, (_, i) => questions[i] || { prep: 15, resp: 45 });
+      saveData();
+      questionButtonsDiv.innerHTML = '';
+      questionSettingsDiv.innerHTML = '';
+      for (let i = 1; i <= count; i++) {
+        const btn = document.createElement("button");
+        btn.textContent = `Q${i}`;
+        btn.onclick = () => selectQuestion(i);
+        questionButtonsDiv.appendChild(btn);
+
+        const settingRow = document.createElement("div");
+        settingRow.className = "row";
+        settingRow.innerHTML = `
+          <span>Q${i}</span>
+          준비: <input type="number" value="${questions[i - 1].prep}" min="0" onchange="updateTime(${i}, 'prep', this.value)"> 초
+          발화: <input type="number" value="${questions[i - 1].resp}" min="0" onchange="updateTime(${i}, 'resp', this.value)"> 초
+        `;
+        questionSettingsDiv.appendChild(settingRow);
+      }
+      resetTimer();
+    }
+
+    function updateTime(index, type, value) {
+      questions[index - 1][type] = parseInt(value);
+      saveData();
+      if (currentQuestion === index) resetTimer();
+    }
+
+    function selectQuestion(index) {
+      currentQuestion = index;
+      resetTimer();
+    }
+
+    function formatTime(sec) {
+      const m = String(Math.floor(sec / 60)).padStart(2, '0');
+      const s = String(sec % 60).padStart(2, '0');
+      return `${m}:${s}`;
+    }
+
+    function startTimer(callback) {
+      clearInterval(timer);
+      playBeep();
+      let total = questions[currentQuestion - 1].prep;
+      modeDisplay.textContent = "Preparation";
+      timerDisplay.textContent = formatTime(total);
+      timer = setInterval(() => {
+        total--;
+        timerDisplay.textContent = formatTime(total);
+        if (total <= 0) {
+          clearInterval(timer);
+          startSpeaking(callback);
+        }
+      }, 1000);
+    }
+
+    function startSpeaking(callback) {
+      playBeep();
+      let total = questions[currentQuestion - 1].resp;
+      modeDisplay.textContent = "Speaking";
+      timerDisplay.textContent = formatTime(total);
+      timer = setInterval(() => {
+        total--;
+        timerDisplay.textContent = formatTime(total);
+        if (total <= 0) {
+          clearInterval(timer);
+          playBeep();
+          modeDisplay.textContent = "Done";
+          if (callback) callback();
+        }
+      }, 1000);
+    }
+
+    function resetTimer() {
+      clearInterval(timer);
+      modeDisplay.textContent = "Preparation";
+      timerDisplay.textContent = formatTime(questions[currentQuestion - 1].prep);
+    }
+
+    function startSelectedOrCurrent() {
+      if (playRange && rangeList.length > 0) {
+        runRangeIndex(0);
+      } else {
+        runSingleOrAuto();
+      }
+    }
+
+    function runSingleOrAuto() {
+      startTimer(() => {
+        if (autoAdvanceCheckbox.checked && currentQuestion < questions.length) {
+          currentQuestion++;
+          runSingleOrAuto();
+        }
+      });
+    }
+
+    function startRangeQuestions() {
+      const start = parseInt(document.getElementById("rangeStart").value);
+      const end = parseInt(document.getElementById("rangeEnd").value);
+      rangeList = [];
+      for (let i = start; i <= end; i++) {
+        if (i >= 1 && i <= questions.length) {
+          rangeList.push(i);
+        }
+      }
+      if (rangeList.length > 0) {
+        playRange = true;
+        runRangeIndex(0);
+      }
+    }
+
+    function runRangeIndex(i) {
+      if (i >= rangeList.length) {
+        playRange = false;
+        modeDisplay.textContent = "Range Done";
+        return;
+      }
+      currentQuestion = rangeList[i];
+      startTimer(() => {
+        if (autoAdvanceCheckbox.checked) {
+          runRangeIndex(i + 1);
+        }
+      });
+    }
+
+    loadSavedData();
+    renderQuestionButtons();
+  </script>
+</body>
+</html>
